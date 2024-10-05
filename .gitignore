@@ -1,0 +1,12 @@
+TRANS/
+HiTANet/
+RAPT/
+*.zip
+results/
+log/
+data/
+src/dataset/
+.ipynb_checkpoints/
+__pycache__/
+*.ipynb
+.hypothesis/
