@@ -1,23 +1,28 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from src.models.layers import EncoderNew, TimeEncoder
+from src.models.layers import EncoderPretrained, TimeEncoder
 
 
-class TransformerTime(nn.Module):
-    def __init__(self, n_diagnosis_codes, batch_size, device, args):
-        super(TransformerTime, self).__init__()
+class TransformerTimeGPT(nn.Module):
+    def __init__(self, n_diagnosis_codes, n_procedure_code, n_drug_code, batch_size, device, args, pretrained_emb=None):
+        super(TransformerTimeGPT, self).__init__()
         self.device = device
         self.time_encoder = TimeEncoder(batch_size, device=self.device)
-        self.feature_encoder = EncoderNew(n_diagnosis_codes, 51,
-                                          model_dim=256,
-                                          num_layers=args.num_layers, 
-                                          device=self.device)
+        self.feature_encoder = EncoderPretrained(diag_vocab_size=n_diagnosis_codes, 
+                                                 proc_vocab_size=n_procedure_code,
+                                                 dr_vocab_size=n_drug_code,
+                                                 max_seq_len=51,
+                                                 model_dim=args.model_dim,
+                                                 num_layers=args.num_layers, 
+                                                 device=self.device,
+                                                 pretrained_emb=pretrained_emb,
+                                                 pretrained_freeze=args.pretrained_freeze)
         
-        self.self_layer = torch.nn.Linear(256, 1)
-        self.classify_layer = torch.nn.Linear(256, args.num_classes)
-        self.quiry_layer = torch.nn.Linear(256, 64)
-        self.quiry_weight_layer = torch.nn.Linear(256, 2)
+        self.self_layer = torch.nn.Linear(args.model_dim, 1)
+        self.classify_layer = torch.nn.Linear(args.model_dim, args.num_classes)
+        self.quiry_layer = torch.nn.Linear(args.model_dim, 64)
+        self.quiry_weight_layer = torch.nn.Linear(args.model_dim, 2)
         self.relu = nn.ReLU(inplace=True)
         # dropout layer
         dropout_rate = args.dropout_rate
@@ -33,13 +38,14 @@ class TransformerTime(nn.Module):
         # seq_time_step: [batch_size, length] the day times to the final visit
         # batch_labels: [batch_size, 100] 0 negative 1 positive for 100 disease
         diagnosis_codes = torch.tensor(batch_data['visit_seq'], dtype=torch.long, device=self.device)
+        diagnosis_code_types = torch.tensor(batch_data['visit_code_types'], dtype=torch.long, device=self.device)
         seq_time_step = batch_data['time_delta']
         lengths = batch_data['length'].to(self.device)
         mask_mult = torch.tensor(1-batch_data['seq_mask'], dtype=torch.bool, device=self.device).unsqueeze(2)
         mask_final = batch_data['seq_mask_final'].unsqueeze(2).to(self.device)
         mask_code = batch_data['seq_mask_code'].unsqueeze(3).to(self.device)
 
-        features = self.feature_encoder(diagnosis_codes, mask_code, seq_time_step, lengths)
+        features = self.feature_encoder(diagnosis_codes, diagnosis_code_types, mask_code, seq_time_step, lengths)
         final_statues = features * mask_final
         final_statues = final_statues.sum(1, keepdim=True)
         quiryes = self.relu(self.quiry_layer(final_statues))

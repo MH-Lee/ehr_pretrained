@@ -23,10 +23,13 @@ def train_model(model, loader, optimizer, criterion, epoch, device, model_name, 
         
         loss.backward()
         
-        if args.use_pretrained:
-            if args.pretrained_freeze:
-                for i in range(1, 870):
-                    model.feature_encoder.pre_embedding.weight[i].grad = None
+        # if args.use_pretrained:
+        #     if args.pretrained_freeze:
+        #         import pdb; pdb.set_trace()
+        #         for i in range(0, 870):
+        #             model.feature_encoder.pre_embedding.weight[i].grad = None
+        #     else:
+        #         pass
         
         optimizer.step()
         train_loss += loss.item()

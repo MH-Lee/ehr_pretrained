@@ -10,3 +10,4 @@ src/dataset/
 __pycache__/
 *.ipynb
 .hypothesis/
+*.log

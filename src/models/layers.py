@@ -81,7 +81,6 @@ class PositionalWiseFeedForward(nn.Module):
         output = x.transpose(1, 2)
         output = self.w2(F.relu(self.w1(output)))
         output = self.dropout(output.transpose(1, 2))
-
         # add residual and norm layer
         output = self.layer_norm(x + output)
         return output
@@ -222,3 +221,79 @@ class TimeEncoder(nn.Module):
         selection_feature = torch.sum(selection_feature * final_queries, 2, keepdim=True) / 8
         selection_feature = selection_feature.masked_fill_(mask, -np.inf)
         return torch.softmax(selection_feature, 1)
+    
+    
+
+class EncoderPretrained(nn.Module):
+    def __init__(self,
+                 diag_vocab_size,
+                 proc_vocab_size,
+                 dr_vocab_size,
+                 max_seq_len,
+                 pretrained_emb,
+                 num_layers=1,
+                 model_dim=256,
+                 num_heads=4,
+                 ffn_dim=1024,
+                 dropout=0.0,
+                 pretrained_freeze=True,
+                 device=torch.device('cuda:0')):
+        super(EncoderPretrained, self).__init__()
+        self.encoder_layers = nn.ModuleList(
+            [EncoderLayer(model_dim, num_heads, ffn_dim, dropout) for _ in
+             range(num_layers)])
+        self.emb_dim = model_dim
+        
+        if pretrained_emb is None:
+            self.embedding_diagnosis = Embedding(diag_vocab_size + 1, model_dim, padding_idx=0)
+        else:
+            self.pretrained_freeze = pretrained_freeze
+            self.pretrained_emb = pretrained_emb[:, :model_dim] 
+            self.embedding_diagnosis = nn.Embedding.from_pretrained(self.pretrained_emb, 
+                                                                    freeze=self.pretrained_freeze,
+                                                                    padding_idx=0)
+        self.embedding_procedure = Embedding(proc_vocab_size + 1, model_dim, padding_idx=0)
+        self.embedding_drug = Embedding(dr_vocab_size + 1, model_dim, padding_idx=0)
+        self.bias_embedding = nn.Parameter(torch.Tensor(model_dim))
+        
+        bound = 1 / math.sqrt(diag_vocab_size + proc_vocab_size + dr_vocab_size + 1)
+        init.uniform_(self.bias_embedding, -bound, bound)
+
+        self.pos_embedding = PositionalEncoding(model_dim, max_seq_len)
+        self.time_layer = torch.nn.Linear(64, model_dim)
+        self.selection_layer = torch.nn.Linear(1, 64)
+        self.relu = nn.ReLU()
+        self.tanh = nn.Tanh()
+        self.device = device
+        
+    def get_embedding(self, code_seq, code_types):
+        # 마스크 생성: visit_code_type에 따라 코드를 분리
+        diagnosis_code = torch.where(code_types == 1, code_seq, 0)  # 진단 코드
+        procedure_code = torch.where(code_types == 2, code_seq, 0)  # 시술 코드
+        drug_code = torch.where(code_types == 3, code_seq, 0)       # 약물 코드
+        # 각 코드 타입에 해당하는 visit_seq 값을 추출하여 임베딩
+        diag_emb = self.embedding_diagnosis(diagnosis_code)
+        proc_emb = self.embedding_procedure(procedure_code)
+        drug_emb = self.embedding_drug(drug_code)
+        # import pdb; pdb.set_trace()
+        output_emb = diag_emb + proc_emb + drug_emb
+        return output_emb
+
+    def forward(self, code_seq, code_types, mask_code, seq_time_step, input_len):
+        seq_time_step = (seq_time_step.unsqueeze(2) / 180).to(self.device)
+        time_feature = 1 - self.tanh(torch.pow(self.selection_layer(seq_time_step), 2))
+        time_feature = self.time_layer(time_feature)
+        self.pre_embedding = self.get_embedding(code_seq, code_types)
+        output = (self.pre_embedding * mask_code).sum(dim=2) + self.bias_embedding
+        output += time_feature
+        output_pos, ind_pos = self.pos_embedding(input_len.unsqueeze(1).to(self.device))
+        output += output_pos
+        self_attention_mask = padding_mask(ind_pos, ind_pos)
+
+        attentions = []
+        outputs = []
+        for encoder in self.encoder_layers:
+            output, attention = encoder(output, self_attention_mask)
+            attentions.append(attention)
+            outputs.append(output)
+        return output
