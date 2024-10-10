@@ -5,7 +5,7 @@ RAPT/
 results/
 log/
 data/
-src/dataset/
+src/dataset/preprocess
 .ipynb_checkpoints/
 __pycache__/
 *.ipynb
