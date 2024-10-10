@@ -88,8 +88,6 @@ class Runner:
         self.test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn_new)
         
         if load_pretrained:
-
-            
             if pretraine_type == 'te3-small':
                 self.gpt4o_emb = pickle.load(open(osp.join(self.args.data_dir, 'gpt_emb', 'gpt4o_te3_small_v2.pkl'), 'rb'))
             elif pretraine_type == 'te3-large':

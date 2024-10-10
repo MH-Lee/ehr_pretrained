@@ -11,3 +11,4 @@ __pycache__/
 *.ipynb
 .hypothesis/
 *.log
+nohup_logs/
